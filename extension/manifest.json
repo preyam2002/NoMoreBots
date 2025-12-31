@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "AI Tweet Filter",
+  "version": "1.0.0",
+  "description": "Hides AI-generated tweets using cloud classification.",
+  "permissions": ["storage", "activeTab"],
+  "host_permissions": [
+    "*://*.twitter.com/*",
+    "*://*.x.com/*",
+    "http://localhost:3000/*"
+  ],
+  "action": {
+    "default_popup": "src/popup/index.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.twitter.com/*", "*://*.x.com/*"],
+      "js": ["src/content/index.ts"]
+    }
+  ],
+  "background": {
+    "service_worker": "src/background/index.ts",
+    "type": "module"
+  }
+}
