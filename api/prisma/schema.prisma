@@ -1,0 +1,70 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Tweet {
+  id            String   @id
+  authorHandle  String
+  text          String
+  aiProbability Float
+  isHidden      Boolean
+  createdAt     DateTime @default(now())
+  
+  author        Author   @relation(fields: [authorHandle], references: [handle])
+}
+
+model Author {
+  handle        String   @id
+  tweets        Tweet[]
+  isFlagged     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model ClassificationLog {
+  id        String   @id @default(uuid())
+  tweetId   String
+  result    Json
+  timestamp DateTime @default(now())
+}
+
+model ExtensionUser {
+  id            String   @id @default(uuid())
+  createdAt     DateTime @default(now())
+  isPremium     Boolean  @default(false)
+  requestCount  Int      @default(0)
+  lastRequest   DateTime @default(now())
+  
+  // Stats
+  tweetsScanned Int      @default(0)
+  botsBlocked   Int      @default(0) // Tweets classified as AI
+
+  // Content Filters
+  filterEngagement Boolean @default(false)
+  filterRagebait   Boolean @default(false)
+  filterHateSpeech Boolean @default(false)
+
+  rules         UserRule[]
+}
+
+enum RuleType {
+  WHITELIST
+  BLACKLIST
+  KEYWORD
+}
+
+model UserRule {
+  id        String      @id @default(uuid())
+  userId    String
+  user      ExtensionUser @relation(fields: [userId], references: [id])
+  type      RuleType
+  value     String      // handle (without @) or keyword
+  createdAt DateTime    @default(now())
+
+  @@index([userId])
+}
