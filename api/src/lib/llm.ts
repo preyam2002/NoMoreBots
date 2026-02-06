@@ -5,9 +5,11 @@ import { env } from "./env";
 
 export type LLMProvider = "openai" | "gemini" | "anthropic";
 
-const openai = new OpenAI({
-  apiKey: env.OPENAI_API_KEY,
-});
+const openai = env.OPENAI_API_KEY
+  ? new OpenAI({
+      apiKey: env.OPENAI_API_KEY,
+    })
+  : null;
 
 const gemini = env.GEMINI_API_KEY
   ? new GoogleGenerativeAI(env.GEMINI_API_KEY)
@@ -21,6 +23,8 @@ const SYSTEM_PROMPT =
 
 async function classifyWithOpenAI(content: string, apiKey?: string) {
   const client = apiKey ? new OpenAI({ apiKey }) : openai;
+  if (!client) throw new Error("OpenAI API key not configured");
+
   const completion = await client.chat.completions.create({
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
@@ -37,13 +41,34 @@ async function classifyWithOpenAI(content: string, apiKey?: string) {
 }
 
 async function classifyWithGemini(content: string, apiKey?: string) {
-  const client = apiKey ? new GoogleGenerativeAI(apiKey) : gemini;
-  if (!client) throw new Error("Gemini API key not configured");
+  const key = apiKey || env.GEMINI_API_KEY;
+  if (!key) throw new Error("Gemini API key not configured");
 
-  const model = client.getGenerativeModel({ model: "gemini-pro" });
-  const result = await model.generateContent(`${SYSTEM_PROMPT}\n\n${content}`);
-  const response = await result.response;
-  const textResponse = response.text();
+  // Log the tweet content being classified
+  console.log(
+    "[GEMINI] Classifying tweet:",
+    content.substring(0, 100) + (content.length > 100 ? "..." : "")
+  );
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: `${SYSTEM_PROMPT}\n\n${content}` }] }],
+        generationConfig: { temperature: 0.3 },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
   // Gemini might wrap JSON in markdown code blocks
   const jsonMatch = textResponse.match(/\{[\s\S]*\}/);
