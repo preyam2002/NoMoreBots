@@ -1,44 +1,35 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 function App() {
   const [enabled, setEnabled] = useState(true);
   const [threshold, setThreshold] = useState(0.75);
-  const [stats, setStats] = useState({ scanned: 0, hidden: 0 });
+  const [stats, setStats] = useState<{ scanned: number; hidden: number }>({
+    scanned: 0,
+    hidden: 0,
+  });
   const [status, setStatus] = useState<"connected" | "error">("connected");
   const [apiKey, setApiKey] = useState("");
-
-  const [showRules, setShowRules] = useState(false);
-  const [rules, setRules] = useState<any[]>([]);
-  const [newRuleValue, setNewRuleValue] = useState("");
-  const [newRuleType, setNewRuleType] = useState("WHITELIST");
-
-  const fetchRules = async (userId: string) => {
-    try {
-      const res = await fetch(
-        `http://localhost:3000/api/rules?userId=${userId}`
-      );
-      const data = await res.json();
-      if (data.rules) setRules(data.rules);
-    } catch (e) {
-      console.error(e);
-    }
-  };
+  const [limitReached, setLimitReached] = useState(false);
+  const [userId, setUserId] = useState<string>("");
 
   useEffect(() => {
     // Load settings from storage
     chrome.storage.local.get(
-      ["enabled", "threshold", "stats", "userApiKey", "userId"],
+      ["enabled", "threshold", "stats", "userApiKey", "userId", "limitReached"],
       (result) => {
         if (result.enabled !== undefined) setEnabled(result.enabled);
         if (result.threshold !== undefined) setThreshold(result.threshold);
         if (result.stats) setStats(result.stats);
         if (result.userApiKey) setApiKey(result.userApiKey);
-        if (result.userId) fetchRules(result.userId);
+        if (result.userId) {
+          setUserId(result.userId);
+        }
+        if (result.limitReached) setLimitReached(result.limitReached);
       }
     );
 
     // Simple health check
-    fetch("http://localhost:3000/api/health") // Assuming we add a health endpoint or just check classify
+    fetch("http://localhost:3000/api/health")
       .then((res) => {
         if (!res.ok) setStatus("error");
       })
@@ -112,7 +103,7 @@ function App() {
             <button
               onClick={() =>
                 chrome.tabs.create({
-                  url: `http://localhost:3000/dashboard?userId=${stats.userId}`,
+                  url: `http://localhost:3000/dashboard?userId=${userId}`,
                 })
               }
               className="flex-1 bg-gray-800 text-white py-2 rounded text-sm font-medium hover:bg-gray-700"
@@ -120,7 +111,7 @@ function App() {
               Open Dashboard
             </button>
             <button
-              onClick={handlePayment}
+              onClick={handleUpgrade}
               className="flex-1 bg-gradient-to-r from-blue-600 to-purple-600 text-white py-2 rounded text-sm font-medium hover:opacity-90"
             >
               Upgrade to Premium

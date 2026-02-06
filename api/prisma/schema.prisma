@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -29,7 +29,7 @@ model Author {
 model ClassificationLog {
   id        String   @id @default(uuid())
   tweetId   String
-  result    Json
+  result    String // Was Json, now String for SQLite
   timestamp DateTime @default(now())
 }
 
@@ -52,17 +52,17 @@ model ExtensionUser {
   rules         UserRule[]
 }
 
-enum RuleType {
-  WHITELIST
-  BLACKLIST
-  KEYWORD
-}
+// enum RuleType {
+//   WHITELIST
+//   BLACKLIST
+//   KEYWORD
+// }
 
 model UserRule {
   id        String      @id @default(uuid())
   userId    String
   user      ExtensionUser @relation(fields: [userId], references: [id])
-  type      RuleType
+  type      String // Was RuleType enum, now String for SQLite
   value     String      // handle (without @) or keyword
   createdAt DateTime    @default(now())
 

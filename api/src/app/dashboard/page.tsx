@@ -168,6 +168,89 @@ export default function Dashboard() {
           </div>
         </section>
 
+        {/* Content Filters Section */}
+        <section className="bg-white p-6 rounded shadow mb-8">
+          <h2 className="text-xl font-bold mb-4">Content Filters</h2>
+          <p className="text-gray-500 text-sm mb-4">
+            Enable these filters to automatically hide specific types of content
+            beyond AI detection.
+          </p>
+          <div className="space-y-4">
+            <label className="flex items-center justify-between p-3 bg-gray-50 rounded border cursor-pointer hover:bg-gray-100">
+              <div>
+                <span className="font-medium">Engagement Farming</span>
+                <p className="text-xs text-gray-500">
+                  Hide tweets explicitly asking for likes, retweets, or replies
+                </p>
+              </div>
+              <input
+                type="checkbox"
+                checked={filters.engagement}
+                onChange={async (e) => {
+                  const newValue = e.target.checked;
+                  setFilters((prev) => ({ ...prev, engagement: newValue }));
+                  await fetch("/api/settings", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      userId,
+                      filterEngagement: newValue,
+                    }),
+                  });
+                }}
+                className="w-5 h-5 accent-blue-600"
+              />
+            </label>
+            <label className="flex items-center justify-between p-3 bg-gray-50 rounded border cursor-pointer hover:bg-gray-100">
+              <div>
+                <span className="font-medium">Ragebait</span>
+                <p className="text-xs text-gray-500">
+                  Hide intentionally provocative content designed to cause anger
+                </p>
+              </div>
+              <input
+                type="checkbox"
+                checked={filters.ragebait}
+                onChange={async (e) => {
+                  const newValue = e.target.checked;
+                  setFilters((prev) => ({ ...prev, ragebait: newValue }));
+                  await fetch("/api/settings", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ userId, filterRagebait: newValue }),
+                  });
+                }}
+                className="w-5 h-5 accent-orange-600"
+              />
+            </label>
+            <label className="flex items-center justify-between p-3 bg-gray-50 rounded border cursor-pointer hover:bg-gray-100">
+              <div>
+                <span className="font-medium">Hate Speech</span>
+                <p className="text-xs text-gray-500">
+                  Hide content that attacks protected groups
+                </p>
+              </div>
+              <input
+                type="checkbox"
+                checked={filters.hateSpeech}
+                onChange={async (e) => {
+                  const newValue = e.target.checked;
+                  setFilters((prev) => ({ ...prev, hateSpeech: newValue }));
+                  await fetch("/api/settings", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      userId,
+                      filterHateSpeech: newValue,
+                    }),
+                  });
+                }}
+                className="w-5 h-5 accent-red-600"
+              />
+            </label>
+          </div>
+        </section>
+
         {/* Rules Section */}
         <section className="bg-white p-6 rounded shadow mb-8">
           <h2 className="text-xl font-bold mb-4">Filtering Rules</h2>

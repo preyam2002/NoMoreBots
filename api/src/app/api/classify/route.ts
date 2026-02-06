@@ -31,7 +31,7 @@ export async function POST(request: Request) {
     const userId = request.headers.get("x-user-id");
     const userApiKey =
       request.headers.get("x-api-key") || request.headers.get("x-openai-key");
-    const provider = (request.headers.get("x-provider") || "openai") as
+    const provider = (request.headers.get("x-provider") || "gemini") as
       | "openai"
       | "gemini"
       | "anthropic";
@@ -55,6 +55,9 @@ export async function POST(request: Request) {
 
     const { tweets } = parseResult.data;
     const batchSize = tweets.length;
+    console.log(
+      `[API] Received batch of ${batchSize} tweets from user ${userId}`
+    );
 
     // 3. User & Monetization Check
     let useSystemKey = true;
@@ -70,19 +73,9 @@ export async function POST(request: Request) {
     });
 
     if (!useSystemKey) {
-      // User provided key, no limit check needed (or maybe just log it)
+      // User provided key, no limit check needed
     } else {
-      // Check usage limit
-      if (user.requestCount + batchSize > 100 && !user.isPremium) {
-        return NextResponse.json(
-          {
-            error: "Free limit reached",
-            code: "LIMIT_REACHED",
-            usage: user.requestCount,
-          },
-          { status: 402 }
-        );
-      }
+      // Limit check removed per user request
     }
 
     // Fetch user rules
@@ -211,12 +204,12 @@ export async function POST(request: Request) {
           await tx.classificationLog.create({
             data: {
               tweetId: tweet.id,
-              result: {
+              result: JSON.stringify({
                 aiProbability: finalProbability,
                 category,
                 reason: finalReason,
                 provider,
-              },
+              }),
             },
           });
         });
