@@ -1,231 +1,317 @@
 # NoMoreBots
 
-A Chrome extension that filters AI-generated tweets on X (Twitter) using AI-powered content analysis.
+A Chrome extension that filters AI-generated and low-quality content from your Twitter/X feed using AI-powered content analysis.
 
-## Overview
+![Version](https://img.shields.io/badge/version-1.1.0-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-NoMoreBots is a browser extension that helps you clean up your X/Twitter feed by detecting and hiding tweets that are likely AI-generated. It uses multiple AI models to analyze tweet content and provides adjustable sensitivity settings.
+## Features
+
+### Core Functionality
+- **AI Detection**: Uses multiple AI models (OpenAI, Claude, Gemini) to detect AI-generated content
+- **Real-time Scanning**: Automatically scans tweets as you scroll through your timeline
+- **Adjustable Sensitivity**: Set threshold from 50% to 95%
+- **Smart Filtering**: Hides content above your threshold with a clean overlay
+
+### Content Filters
+- **Engagement Farming**: Filter tweets asking for likes, retweets, or followers
+- **Ragebait**: Block intentionally provocative content
+- **Hate Speech**: Automatically hide harmful content
+
+### Rules System
+- **Whitelist**: Always show tweets from trusted accounts
+- **Blacklist**: Always hide specific accounts
+- **Keywords**: Block tweets containing specific words
+- **Import/Export**: Backup and share your rules
+
+### Analytics & Dashboard
+- **Statistics Dashboard**: Track scanned/hidden counts
+- **Time Saved**: Estimated time saved from not reading bot content
+- **Usage Tracking**: Monitor API requests and limits
+- **Tabbed Interface**: Overview, Filters, Rules, Analytics
+
+### Premium Features
+- Unlimited API requests
+- Advanced analytics
+- Priority processing
+
+## Tech Stack
+
+### Extension (Chrome)
+- **Framework**: React 18 + TypeScript
+- **Build Tool**: Vite 5
+- **Styling**: Tailwind CSS
+- **Manifest**: V3 with Service Worker
+- **Icons**: Custom SVG icons
+
+### Backend (API)
+- **Framework**: Next.js 14 (App Router)
+- **Database**: SQLite with Prisma ORM
+- **AI Providers**: OpenAI, Anthropic, Google Gemini
+- **Validation**: Zod
+- **Testing**: Jest
+
+## Quick Start
+
+### Prerequisites
+- Node.js 18+
+- npm or pnpm
+- Chrome browser
+- API key from at least one AI provider (OpenAI, Anthropic, or Google)
+
+### Installation
+
+1. **Clone and setup**
+```bash
+cd NoMoreBots
+```
+
+2. **Setup the API**
+```bash
+cd api
+npm install
+cp .env.example .env.local
+# Edit .env.local with your API keys
+npm run postinstall
+npm run dev
+```
+
+3. **Setup the Extension**
+```bash
+cd extension
+npm install
+npm run build
+```
+
+4. **Install in Chrome**
+- Open `chrome://extensions`
+- Enable "Developer mode"
+- Click "Load unpacked"
+- Select `extension/dist` folder
+
+### Environment Variables
+
+#### API (.env.local)
+```env
+DATABASE_URL="file:./dev.db"
+
+# At least one required
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+GEMINI_API_KEY=...
+
+# Optional (for payments)
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+STRIPE_PRICE_ID=price_...
+
+# App URL
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+```
+
+## Usage
+
+### Basic Operations
+
+1. **Enable/Disable**: Toggle the filter from the extension popup
+2. **Adjust Sensitivity**: Use the slider to set how strict detection should be
+3. **Add Rules**: Go to the Rules tab to whitelist/blacklist accounts
+4. **Configure Filters**: Enable engagement farming, ragebait, or hate speech filters
+5. **View Analytics**: Check the dashboard for usage statistics
+
+### Keyboard Shortcuts
+- `Ctrl+Shift+B` / `Cmd+Shift+B`: Toggle filter
+- `Ctrl+Shift+S` / `Cmd+Shift+S`: Show stats
+
+### API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/classify` | POST | Classify tweets for AI content |
+| `/api/stats` | GET | Get user statistics |
+| `/api/settings` | POST | Update filter preferences |
+| `/api/rules` | GET/POST/DELETE | Manage whitelist/blacklist rules |
+| `/api/health` | GET | Health check |
+| `/api/checkout` | POST | Create Stripe checkout session |
+
+### Classification Request
+```typescript
+POST /api/classify
+Headers:
+  x-user-id: string (required)
+  x-api-key: string (optional)
+  x-provider: "openai" | "gemini" | "anthropic" (optional)
+
+Body:
+{
+  tweets: [{
+    id: string,
+    text: string,
+    authorHandle: string (optional),
+    context: string (optional)
+  }]
+}
+
+Response:
+{
+  results: [{
+    tweetId: string,
+    aiProbability: number (0-1),
+    label: "ai" | "human" | "engagement" | "ragebait" | "hate_speech",
+    reason: string,
+    cached: boolean
+  }]
+}
+```
 
 ## Project Structure
 
 ```
 NoMoreBots/
-├── api/                          # Next.js backend API
-│   ├── package.json
-│   ├── prisma/                   # Prisma schema and migrations
+├── api/                          # Next.js Backend
 │   ├── src/
-│   │   └── app/
-│   │       └── api/
-│   │           └── analyze/
-│   │               └── route.ts  # Tweet analysis endpoint
-│   └── ...
-├── extension/                    # Chrome Extension (Manifest V3)
-│   ├── package.json
+│   │   ├── app/
+│   │   │   ├── api/
+│   │   │   │   ├── classify/     # Classification endpoint
+│   │   │   │   ├── rules/       # Rules CRUD
+│   │   │   │   ├── settings/    # Filter settings
+│   │   │   │   ├── stats/       # User statistics
+│   │   │   │   └── health/      # Health check
+│   │   │   └── dashboard/       # Dashboard page
+│   │   └── lib/
+│   │       ├── llm.ts          # AI provider integration
+│   │       ├── prisma.ts       # Database client
+│   │       ├── ratelimit.ts    # Rate limiting
+│   │       └── env.ts          # Environment validation
+│   └── prisma/
+│       └── schema.prisma       # Database schema
+│
+├── extension/                    # Chrome Extension
 │   ├── src/
-│   │   ├── background.ts         # Service worker
-│   │   ├── content.ts            # Content script for X/Twitter
-│   │   ├── popup.tsx             # Extension popup UI
-│   │   └── App.tsx               # Popup component
-│   ├── manifest.json
-│   └── vite.config.ts
-└── shared/                       # Shared TypeScript types
+│   │   ├── background/         # Service worker
+│   │   │   └── index.ts       # Command handling, analytics
+│   │   ├── content/            # Content script
+│   │   │   └── index.ts       # Tweet detection, filtering
+│   │   └── popup/             # Extension popup UI
+│   │       ├── App.tsx        # Main popup component
+│   │       └── ...
+│   ├── manifest.json           # Manifest V3
+│   └── icons/                  # Extension icons (SVG)
+│
+└── shared/                      # Shared TypeScript types
     └── types.ts
 ```
 
-## Features
-
-- **Real-time tweet scanning**: Automatically scans tweets as you scroll through your X/Twitter timeline
-- **AI detection**: Uses multiple AI providers (OpenAI, Claude, Gemini) to detect AI-generated content
-- **Adjustable sensitivity**: Set threshold for what gets filtered (0-100 scale)
-- **Statistics tracking**: Count of hidden tweets displayed in popup
-- **Toggle control**: Enable/disable filtering with one click
-- **Clean UI**: Simple popup interface with stats and controls
-
-## Tech Stack
-
-### Extension
-- **Framework**: React 18.2.0 + TypeScript 5
-- **Build Tool**: Vite 5.1.6
-- **Styling**: Tailwind CSS 3.4.1
-- **Chrome Extension**: Manifest V3 with @crxjs/vite-plugin 2.0.0-beta.23
-- **Chrome Types**: @types/chrome 0.0.263
-
-### API
-- **Framework**: Next.js 14.1.0
-- **Language**: TypeScript
-- **ORM**: Prisma 5.10.0 with @prisma/client
-- **Database**: PostgreSQL (via Prisma)
-- **AI Providers**:
-  - OpenAI SDK 4.28.0
-  - Anthropic SDK 0.71.0
-  - Google Generative AI 0.24.1
-- **Validation**: Zod 3.22.4
-- **Payments**: Stripe 20.0.0
-- **Testing**: Jest 29.7.0 with ts-jest
-
-## Prerequisites
-
-- Node.js 18+
-- npm or pnpm
-- Chrome browser
-- OpenAI API Key (or Anthropic/Google key)
-- PostgreSQL database (optional, for metrics)
-
-## Setup
-
-### 1. Backend (API)
-
-```bash
-cd api
-
-# Install dependencies
-npm install
-
-# Set up environment variables
-cp .env.example .env.local
-
-# Edit .env.local:
-# OPENAI_API_KEY=sk-...
-# ANTHROPIC_API_KEY=sk-ant-...
-# GOOGLE_API_KEY=...
-# DATABASE_URL=postgresql://...
-
-# Generate Prisma client
-npm run postinstall
-
-# Run development server
-npm run dev
-```
-
-The API will run at `http://localhost:3000`.
-
-### 2. Extension
-
-```bash
-cd extension
-
-# Install dependencies
-npm install
-
-# Build extension
-npm run build
-
-# Or run in development mode
-npm run dev
-```
-
-### 3. Install in Chrome
-
-1. Open Chrome and navigate to `chrome://extensions`
-2. Enable "Developer mode" (toggle in top right)
-3. Click "Load unpacked"
-4. Select the `extension/dist` folder
-5. The extension icon should appear in your toolbar
-
-## NPM Scripts
-
-### API
-```bash
-npm run dev              # Start dev server
-npm run build            # Build Next.js app
-npm run start            # Start production server
-npm run lint             # Run ESLint
-npm run test             # Run Jest tests
-npm run test:watch       # Run tests in watch mode
-npm run test:coverage    # Run tests with coverage
-npm run postinstall      # Generate Prisma client
-```
-
-### Extension
-```bash
-npm run dev              # Start Vite dev server
-npm run build            # Build extension
-npm run preview          # Preview built extension
-```
-
-## Usage
-
-1. Navigate to X (Twitter)
-2. The extension automatically begins scanning tweets as they load
-3. Click the extension icon to:
-   - Toggle the filter on/off
-   - Adjust sensitivity threshold (0-100)
-   - View statistics (tweets scanned, hidden)
-4. Tweets scoring above your threshold are automatically hidden from view
-
-## How It Works
-
-1. **Content Script Injection**: The extension injects a content script into x.com/twitter.com
-2. **Tweet Detection**: Monitors DOM for new tweets as you scroll
-3. **API Analysis**: Sends tweet text to the backend API
-4. **AI Scoring**: Multiple AI models analyze content for AI-generated patterns:
-   - Generic phrasing
-   - Repetitive structures
-   - Common AI writing patterns
-5. **Threshold Comparison**: AI score compared to user-set threshold
-6. **DOM Manipulation**: High-scoring tweets are hidden from view
-7. **Stats Update**: Hidden count updated in real-time
-
 ## Development
 
-### Extension Development
+### Running Locally
 
 ```bash
+# Terminal 1: API
+cd api
+npm run dev
+
+# Terminal 2: Extension (for HMR)
 cd extension
 npm run dev
 ```
 
-Changes are watched automatically. Note: You may need to reload the extension in Chrome (`chrome://extensions` → refresh icon) for some changes to take effect.
-
-### API Development
+### Building for Production
 
 ```bash
+# Build extension
+cd extension
+npm run build
+
+# Build API
 cd api
-npm run dev
+npm run build
 ```
 
-The API provides:
-- `POST /api/analyze` - Analyze tweet text for AI patterns
-- Response: `{ "aiProbability": number, "confidence": number }`
-
-## Environment Variables
-
-### API (.env.local)
-```env
-OPENAI_API_KEY=sk-...
-ANTHROPIC_API_KEY=sk-ant-...
-GOOGLE_API_KEY=...
-DATABASE_URL=postgresql://...
-STRIPE_SECRET_KEY=sk_test_...
-```
-
-## Testing
+### Testing
 
 ```bash
+# Run API tests
 cd api
-npm run test              # Run all tests
-npm run test:watch        # Watch mode
-npm run test:coverage     # With coverage report
+npm run test
+npm run test:coverage
 ```
 
-Tests cover:
-- Tweet analysis endpoint
-- AI provider integrations
-- Prisma database operations
+## Architecture
+
+### Content Script Flow
+```
+1. Inject into twitter.com/x.com
+2. Observe DOM mutations for new tweets
+3. Extract tweet text and metadata
+4. Batch tweets (up to 10)
+5. Send to background script for classification
+6. Receive AI probability scores
+7. Hide tweets above threshold
+8. Update stats in storage
+```
+
+### Background Script
+```
+1. Handle messages from content script
+2. Proxy requests to API (avoid CORS)
+3. Track keyboard commands
+4. Handle extension lifecycle events
+5. Periodic sync and analytics
+```
+
+### API Flow
+```
+1. Receive classification request
+2. Check rate limits
+3. Validate request
+4. Check cache (Prisma)
+5. Apply user rules (whitelist/blacklist/keywords)
+6. Call AI provider (OpenAI/Claude/Gemini)
+7. Apply content filters
+8. Store results in cache
+9. Update user stats
+10. Return classification
+```
+
+## Security
+
+- **API Keys**: User-provided keys take precedence over system keys
+- **Rate Limiting**: 60 requests per minute per IP
+- **Daily Limits**: 100 free requests/day (configurable)
+- **Privacy**: No tweet content is stored without classification
+- **User Isolation**: Each user can only access their own rules
 
 ## Roadmap
 
-- [ ] Support for more platforms (Reddit, LinkedIn, Facebook)
-- [ ] Custom AI model training for better detection
-- [ ] Community-driven sensitivity profiles
-- [ ] Export/import settings
-- [ ] Statistics dashboard with historical data
-- [ ] Whitelist/blacklist specific accounts
+- [x] Multi-provider AI support
+- [x] Content filters (engagement, ragebait, hate speech)
+- [x] Rules system with import/export
+- [x] Analytics dashboard with tabs
+- [x] Keyboard shortcuts
+- [ ] Mobile app
+- [ ] Firefox extension
+- [ ] Custom ML model training
+- [ ] Community rule sharing
+- [ ] Browser notifications
 
-## Author
+## Contributing
 
-**Preyam** - [GitHub](https://github.com/preyam2002)
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Open a Pull Request
 
 ## License
 
-MIT
+MIT License - see LICENSE file for details.
+
+## Support
+
+- **Issues**: Report bugs via GitHub Issues
+- **Email**: support@nomorebots.app
+
+---
+
+Built with ❤️ to make social media a better place.

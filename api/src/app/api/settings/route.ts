@@ -15,7 +15,18 @@ export async function POST(request: Request) {
     const { userId, filterEngagement, filterRagebait, filterHateSpeech } =
       updateSettingsSchema.parse(body);
 
-    const user = await prisma.extensionUser.update({
+    const user = await prisma.extensionUser.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      return NextResponse.json(
+        { error: "User not found" },
+        { status: 404 }
+      );
+    }
+
+    const updated = await prisma.extensionUser.update({
       where: { id: userId },
       data: {
         filterEngagement,
@@ -24,11 +35,18 @@ export async function POST(request: Request) {
       },
     });
 
-    return NextResponse.json({ success: true, user });
+    return NextResponse.json({ success: true, user: updated });
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: "Invalid request body", details: error.errors },
+        { status: 400 }
+      );
+    }
+    console.error("Settings update error:", error);
     return NextResponse.json(
       { error: "Failed to update settings" },
-      { status: 400 }
+      { status: 500 }
     );
   }
 }

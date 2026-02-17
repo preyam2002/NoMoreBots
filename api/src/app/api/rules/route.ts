@@ -53,7 +53,7 @@ export async function POST(request: Request) {
 export async function DELETE(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const id = searchParams.get("id");
+    const id = searchParams.get("id") || searchParams.get("ruleId");
     const userId = searchParams.get("userId"); // Security check
 
     if (!id || !userId) {

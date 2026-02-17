@@ -15,6 +15,7 @@ export async function GET(request: Request) {
       select: {
         tweetsScanned: true,
         botsBlocked: true,
+        requestCount: true,
         isPremium: true,
         filterEngagement: true,
         filterRagebait: true,
@@ -26,7 +27,18 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ stats: user });
+    const DAILY_LIMIT = 100;
+
+    return NextResponse.json({
+      scanned: user.tweetsScanned,
+      hidden: user.botsBlocked,
+      requestCount: user.requestCount,
+      dailyLimit: user.isPremium ? 10000 : DAILY_LIMIT,
+      isPremium: user.isPremium,
+      filterEngagement: user.filterEngagement,
+      filterRagebait: user.filterRagebait,
+      filterHateSpeech: user.filterHateSpeech,
+    });
   } catch (error) {
     console.error("Error fetching stats:", error);
     return NextResponse.json(

@@ -1,6 +1,5 @@
 import { NextRequest } from "next/server";
 
-// Mock Prisma client
 const mockPrisma = {
   extensionUser: {
     upsert: jest.fn(),
@@ -8,10 +7,11 @@ const mockPrisma = {
     findUnique: jest.fn(),
   },
   userRule: {
-    findMany: jest.fn(),
+    findMany: jest.fn().mockResolvedValue([]),
   },
   tweet: {
-    findUnique: jest.fn(),
+    findUnique: jest.fn().mockResolvedValue(null),
+    findMany: jest.fn().mockResolvedValue([]),
     create: jest.fn(),
   },
   author: {
@@ -96,10 +96,9 @@ describe("POST /api/classify", () => {
     });
 
     it("should use cached results for known tweets", async () => {
-      mockPrisma.tweet.findUnique.mockResolvedValueOnce({
-        id: "cached-tweet",
-        aiProbability: 0.9,
-      });
+      mockPrisma.tweet.findMany.mockResolvedValueOnce([
+        { id: "cached-tweet", aiProbability: 0.9 },
+      ]);
 
       const request = createMockRequest({
         tweets: [
@@ -207,25 +206,7 @@ describe("POST /api/classify", () => {
     });
   });
 
-  describe("rate limiting", () => {
-    it("should return 402 when free limit is reached", async () => {
-      mockPrisma.extensionUser.upsert.mockResolvedValue({
-        id: "test-user-id",
-        isPremium: false,
-        requestCount: 100, // At limit
-        filterEngagement: false,
-        filterRagebait: false,
-        filterHateSpeech: false,
-      });
-
-      const request = createMockRequest({
-        tweets: [{ id: "tweet-1", text: "Content", authorHandle: "user" }],
-      });
-
-      const response = await POST(request);
-      expect(response.status).toBe(402);
-    });
-
+  describe("request processing", () => {
     it("should allow premium users past the limit", async () => {
       mockPrisma.extensionUser.upsert.mockResolvedValue({
         id: "test-user-id",

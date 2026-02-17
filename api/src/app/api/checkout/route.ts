@@ -1,45 +1,89 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { env } from "@/lib/env";
+import { prisma } from "@/lib/prisma";
 
-// Initialize Stripe (we'll need to add the key to env.ts later)
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "", {
-  apiVersion: "2023-10-16",
-});
+const stripe = env.STRIPE_SECRET_KEY
+  ? new Stripe(env.STRIPE_SECRET_KEY, {
+      apiVersion: "2023-10-16",
+    })
+  : null;
+
+const PREMIUM_PRICE_ID = env.STRIPE_PRICE_ID;
 
 export async function POST(request: Request) {
   try {
-    const { userId } = await request.json();
+    if (!stripe) {
+      return NextResponse.json(
+        { error: "Payment system not configured" },
+        { status: 503 }
+      );
+    }
+
+    const { userId, priceId } = await request.json();
 
     if (!userId) {
       return NextResponse.json({ error: "Missing userId" }, { status: 400 });
     }
 
-    // Create Checkout Session
-    const session = await stripe.checkout.sessions.create({
+    // Verify user exists
+    const user = await prisma.extensionUser.findUnique({
+      where: { id: userId },
+      select: { id: true, isPremium: true },
+    });
+
+    if (!user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    if (user.isPremium) {
+      return NextResponse.json({ error: "Already premium" }, { status: 400 });
+    }
+
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+
+    // Create checkout session
+    const sessionParams: Stripe.Checkout.SessionCreateParams = {
       payment_method_types: ["card"],
-      line_items: [
+      mode: "payment",
+      success_url: `${appUrl}/dashboard?userId=${userId}&payment=success`,
+      cancel_url: `${appUrl}/dashboard?userId=${userId}&payment=cancelled`,
+      metadata: { userId },
+      billing_address_collection: "auto",
+      customer_email: undefined,
+      line_items: [],
+    };
+
+    // Use price ID if provided, otherwise use ad-hoc price
+    if (PREMIUM_PRICE_ID && priceId === PREMIUM_PRICE_ID) {
+      sessionParams.line_items = [
+        {
+          price: PREMIUM_PRICE_ID,
+          quantity: 1,
+        },
+      ];
+    } else {
+      sessionParams.line_items = [
         {
           price_data: {
             currency: "usd",
             product_data: {
               name: "AI Tweet Filter Premium",
-              description: "Unlimited AI classifications",
-            },
-            unit_amount: 500, // $5.00
+              description: "Unlimited AI classifications with priority support",
+              images: [`${appUrl}/icon-192.png`],
           },
+          unit_amount: 999, // $9.99
           quantity: 1,
         },
-      ],
-      mode: "payment",
-      success_url: "https://x.com?payment=success", // Redirect back to X
-      cancel_url: "https://x.com?payment=cancelled",
-      metadata: {
-        userId: userId, // Pass userId to webhook
-      },
-    });
+      ];
+    }
 
-    return NextResponse.json({ url: session.url });
+    const session = await stripe.checkout.sessions.create(sessionParams);
+
+    return NextResponse.json({ 
+      url: session.url,
+      sessionId: session.id,
+    });
   } catch (error) {
     console.error("Stripe Error:", error);
     return NextResponse.json(
