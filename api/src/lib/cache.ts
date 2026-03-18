@@ -67,7 +67,7 @@ class LRUCache<T> {
 
   cleanup(): void {
     const now = Date.now();
-    for (const [key, entry] of this.cache) {
+    for (const [key, entry] of Array.from(this.cache)) {
       if (now - entry.timestamp > this.ttl) {
         this.cache.delete(key);
       }
@@ -88,6 +88,9 @@ export const userCache = new LRUCache<{
   filterEngagement: boolean;
   filterRagebait: boolean;
   filterHateSpeech: boolean;
+  filterRacism: boolean;
+  filterVaguePosting: boolean;
+  filterFearmongering: boolean;
 }>(1000, 5 * 60 * 1000); // 5 minutes for user settings
 
 // Cleanup interval

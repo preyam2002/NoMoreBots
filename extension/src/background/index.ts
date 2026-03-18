@@ -1,14 +1,28 @@
+import { DEFAULT_PLAN_ID, PLAN_DEFINITIONS, type PlanFeatureAccess, type PlanId } from "../../../shared/plans";
+import { ADVANCED_FILTER_DEFAULTS } from "../../../shared/filters";
+import {
+  ensureClientIdentity,
+  getClientAuthHeaders,
+  getDefaultApiBaseUrl,
+} from "../lib/identity";
+import { fetchWithTimeout } from "../lib/network";
+
 console.log("NoMoreBots: Background script running");
 
-const DEFAULT_API_URL = "http://localhost:3000:3000/api/classify";
+const DEFAULT_API_BASE_URL = getDefaultApiBaseUrl();
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
+const REQUEST_TIMEOUT_MS = 15000;
 
 interface ExtensionStats {
   scanned: number;
   hidden: number;
+  todayHidden: number;
+  todayDate: string;
   sessions: number;
   lastSession: number;
+  requestCount?: number;
+  dailyLimit?: number;
 }
 
 interface BackgroundError {
@@ -18,32 +32,42 @@ interface BackgroundError {
   stack?: string;
 }
 
-async function getApiUrl(): Promise<string> {
-  const result = await chrome.storage.local.get(["apiUrl"]);
-  return result.apiUrl || DEFAULT_API_URL;
-}
-
-async function getProvider(): Promise<string> {
-  const result = await chrome.storage.local.get(["provider"]);
-  return result.provider || "gemini";
-}
-
 async function getUserSettings() {
   const result = await chrome.storage.local.get([
+    "apiBaseUrl",
     "apiUrl",
     "provider",
     "userApiKey",
     "userId",
+    "clientToken",
     "enabled",
     "threshold",
+    "detectionMode",
+    "activeOnTwitter",
+    "activeOnLinkedin",
+    "plan",
+    "planFeatures",
   ]);
+
+  const legacyApiUrl = result.apiUrl as string | undefined;
+  const apiBaseUrl =
+    (result.apiBaseUrl as string | undefined) ||
+    (legacyApiUrl ? legacyApiUrl.replace(/\/api\/classify$/, "") : undefined) ||
+    DEFAULT_API_BASE_URL;
+
   return {
-    apiUrl: result.apiUrl || DEFAULT_API_URL,
+    apiBaseUrl,
     provider: result.provider || "gemini",
     userApiKey: result.userApiKey || "",
     userId: result.userId || "",
+    clientToken: result.clientToken || "",
     enabled: result.enabled !== false,
     threshold: result.threshold || 0.75,
+    detectionMode: result.detectionMode || "blur",
+    activeOnTwitter: result.activeOnTwitter !== false,
+    activeOnLinkedin: result.activeOnLinkedin !== false,
+    plan: (result.plan || DEFAULT_PLAN_ID) as PlanId,
+    planFeatures: (result.planFeatures || PLAN_DEFINITIONS[DEFAULT_PLAN_ID].features) as PlanFeatureAccess,
   };
 }
 
@@ -90,12 +114,12 @@ async function trackEvent(event: string, data?: Record<string, unknown>) {
 
 async function trackSession() {
   try {
-    const result = await chrome.storage.local.get<ExtensionStats>(["stats"]);
-    const stats: ExtensionStats = result.stats || { scanned: 0, hidden: 0, sessions: 0, lastSession: 0 };
-    
+    const result = await chrome.storage.local.get(["stats"]);
+    const stats: ExtensionStats = result.stats || { scanned: 0, hidden: 0, todayHidden: 0, todayDate: "", sessions: 0, lastSession: 0 };
+
     const now = Date.now();
     const dayInMs = 24 * 60 * 60 * 1000;
-    
+
     if (now - stats.lastSession > dayInMs) {
       stats.sessions += 1;
       stats.lastSession = now;
@@ -120,11 +144,11 @@ async function classifyWithRetry(
 
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      const response = await fetch(url, {
+      const response = await fetchWithTimeout(url, {
         method: "POST",
         headers,
         body,
-      });
+      }, REQUEST_TIMEOUT_MS);
 
       if (response.ok) {
         return response;
@@ -153,18 +177,25 @@ async function classifyWithRetry(
 chrome.runtime.onInstalled.addListener(async (details) => {
   const userId = crypto.randomUUID();
 
-  const defaults = {
+  const defaults: Record<string, unknown> = {
     userId,
+    clientToken: "",
     enabled: true,
     threshold: 0.75,
-    stats: { scanned: 0, hidden: 0, sessions: 0, lastSession: 0 },
+    stats: { scanned: 0, hidden: 0, todayHidden: 0, todayDate: "", sessions: 0, lastSession: 0 },
     userApiKey: "",
-    apiUrl: DEFAULT_API_URL,
+    apiBaseUrl: DEFAULT_API_BASE_URL,
+    apiUrl: `${DEFAULT_API_BASE_URL}/api/classify`,
     provider: "gemini",
-    filterEngagement: false,
-    filterRagebait: false,
-    filterHateSpeech: false,
+    detectionMode: "blur",
+    activeOnTwitter: true,
+    activeOnLinkedin: true,
+    ...ADVANCED_FILTER_DEFAULTS,
     limitReached: false,
+    featureBlocked: "",
+    plan: DEFAULT_PLAN_ID,
+    planFeatures: PLAN_DEFINITIONS[DEFAULT_PLAN_ID].features,
+    history: [],
     events: [],
     errors: [],
   };
@@ -172,6 +203,12 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   const existing = await chrome.storage.local.get(Object.keys(defaults));
   const merged = { ...defaults, ...existing };
   await chrome.storage.local.set(merged);
+
+  try {
+    await ensureClientIdentity(DEFAULT_API_BASE_URL);
+  } catch (error) {
+    console.warn("NoMoreBots: Failed to register client identity during install", error);
+  }
 
   trackEvent("extension_installed", {
     reason: details.reason,
@@ -187,75 +224,132 @@ chrome.runtime.onStartup.addListener(async () => {
 });
 
 chrome.commands.onCommand.addListener(async (command) => {
-  console.log("NoMoreBots: Received command:", command);
-  
   if (command === "toggle-filter") {
     const result = await chrome.storage.local.get(["enabled"]);
     const newEnabled = !result.enabled;
     await chrome.storage.local.set({ enabled: newEnabled });
-    
-    const tabs = await chrome.tabs.query({ url: ["*://*.twitter.com/*", "*://*.x.com/*"] });
+
+    const tabs = await chrome.tabs.query({ url: ["*://*.twitter.com/*", "*://*.x.com/*", "*://*.linkedin.com/*"] });
     tabs.forEach((tab) => {
       if (tab.id) {
         chrome.tabs.sendMessage(tab.id, { type: "FILTER_TOGGLED", enabled: newEnabled });
       }
     });
-    
+
     trackEvent("filter_toggled", { enabled: newEnabled });
-    
+
     chrome.notifications.create({
       type: "basic",
-      iconUrl: "icons/icon128.png",
+      iconUrl: "icons/icon128.svg",
       title: "NoMoreBots",
       message: newEnabled ? "Filter enabled" : "Filter disabled",
     });
   } else if (command === "show-stats") {
     const result = await chrome.storage.local.get(["stats"]);
-    const stats = result.stats || { scanned: 0, hidden: 0 };
-    
+    const stats = result.stats || { scanned: 0, hidden: 0, todayHidden: 0 };
+
     chrome.notifications.create({
       type: "basic",
-      iconUrl: "icons/icon128.png",
+      iconUrl: "icons/icon128.svg",
       title: "NoMoreBots Stats",
-      message: `Scanned: ${stats.scanned} | Hidden: ${stats.hidden}`,
+      message: `Today: ${stats.todayHidden || 0} | Total: ${stats.hidden}`,
     });
-    
+
     trackEvent("stats_shown");
   }
 });
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "CLASSIFY_TWEETS") {
     (async () => {
       try {
-        const settings = await getUserSettings();
-        
+        let settings = await getUserSettings();
+
         if (!settings.enabled) {
           sendResponse({ success: false, error: "Filter is disabled", status: 0 });
           return;
         }
 
+        const identity = await ensureClientIdentity(settings.apiBaseUrl);
+        settings = {
+          ...settings,
+          userId: identity.userId,
+          clientToken: identity.clientToken,
+          plan: identity.plan,
+          planFeatures: identity.featureAccess,
+        };
+
         const response = await classifyWithRetry(
-          settings.apiUrl,
+          `${settings.apiBaseUrl}/api/classify`,
           {
             "Content-Type": "application/json",
             "x-user-id": settings.userId,
             "x-api-key": settings.userApiKey,
             "x-provider": settings.provider,
+            ...getClientAuthHeaders(settings.clientToken),
           },
           JSON.stringify(message.body)
         );
 
         if (!response.ok) {
+          let errorMessage = response.statusText;
+          try {
+            const errorData = await response.json();
+            errorMessage = errorData.error || response.statusText;
+            if (response.status === 403) {
+              await chrome.storage.local.set({
+                featureBlocked: errorMessage,
+                plan: errorData.plan || DEFAULT_PLAN_ID,
+                planFeatures: errorData.featureAccess || PLAN_DEFINITIONS[DEFAULT_PLAN_ID].features,
+              });
+            }
+          } catch {
+            // Ignore JSON parse errors for non-JSON responses.
+          }
+
+          if (response.status === 401) {
+            await chrome.storage.local.set({
+              featureBlocked: "Authentication expired. Open the popup to reconnect this device.",
+            });
+          }
+
+          if (response.status === 402) {
+            await chrome.storage.local.set({ limitReached: true });
+          }
           sendResponse({
             success: false,
-            error: response.statusText,
+            error: errorMessage,
             status: response.status,
           });
           return;
         }
 
         const data = await response.json();
+        const stored = await chrome.storage.local.get(["stats"]);
+        const previousStats = (stored.stats as ExtensionStats | undefined) || {
+          scanned: 0,
+          hidden: 0,
+          todayHidden: 0,
+          todayDate: "",
+          sessions: 0,
+          lastSession: 0,
+        };
+        const nextStats: ExtensionStats = {
+          ...previousStats,
+          requestCount: data.usage?.requestCount,
+          dailyLimit: data.usage?.dailyLimit,
+        };
+
+        await chrome.storage.local.set({
+          userId: settings.userId,
+          clientToken: settings.clientToken,
+          plan: data.plan || DEFAULT_PLAN_ID,
+          planFeatures: data.featureAccess || PLAN_DEFINITIONS[DEFAULT_PLAN_ID].features,
+          stats: nextStats,
+          limitReached: false,
+          featureBlocked: "",
+        });
+
         sendResponse({ success: true, data });
       } catch (error) {
         await logError(error as Error, "CLASSIFY_TWEETS");
@@ -270,12 +364,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     (async () => {
       try {
         const settings = await getUserSettings();
-        const stats = await chrome.storage.local.get(["stats", "limitReached"]);
-        
+        const data = await chrome.storage.local.get(["stats", "limitReached", "history", "featureBlocked"]);
+
         sendResponse({
           ...settings,
-          stats: stats.stats || { scanned: 0, hidden: 0 },
-          limitReached: stats.limitReached || false,
+          stats: data.stats || { scanned: 0, hidden: 0, todayHidden: 0, todayDate: "" },
+          limitReached: data.limitReached || false,
+          featureBlocked: data.featureBlocked || "",
+          historyCount: (data.history || []).length,
         });
       } catch (error) {
         await logError(error as Error, "GET_SETTINGS");
@@ -290,7 +386,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     (async () => {
       try {
         await chrome.storage.local.set({
-          stats: { scanned: 0, hidden: 0, sessions: 0, lastSession: 0 },
+          stats: { scanned: 0, hidden: 0, todayHidden: 0, todayDate: "", sessions: 0, lastSession: 0 },
         });
         trackEvent("stats_reset");
         sendResponse({ success: true });
@@ -299,7 +395,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: false, error: "Failed to reset stats" });
       }
     })();
-    
+
     return true;
   }
 
@@ -313,7 +409,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: false, error: "Failed to get errors" });
       }
     })();
-    
+
     return true;
   }
 
@@ -327,23 +423,43 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: false, error: "Failed to clear errors" });
       }
     })();
-    
+
+    return true;
+  }
+
+  // Forward page stats requests to the active tab
+  if (message.type === "GET_PAGE_STATS_FROM_TAB") {
+    (async () => {
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tab?.id) {
+          chrome.tabs.sendMessage(tab.id, { type: "GET_PAGE_STATS" }, (response) => {
+            sendResponse(response || { pageHidden: 0 });
+          });
+        } else {
+          sendResponse({ pageHidden: 0 });
+        }
+      } catch {
+        sendResponse({ pageHidden: 0 });
+      }
+    })();
     return true;
   }
 });
 
 setInterval(async () => {
   try {
-    const result = await chrome.storage.local.get(["userId", "stats"]);
-    if (!result.userId) return;
-    console.log("NoMoreBots: Periodic sync completed");
+    const result = await chrome.storage.local.get(["apiBaseUrl", "userId", "stats"]);
+    if (!result.userId) {
+      await ensureClientIdentity((result.apiBaseUrl as string | undefined) || DEFAULT_API_BASE_URL);
+    }
   } catch (error) {
     await logError(error as Error, "periodicSync");
   }
 }, 5 * 60 * 1000);
 
-chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  if (changeInfo.status === "complete" && tab.url?.includes("twitter.com")) {
+chrome.tabs.onUpdated.addListener(async (_tabId, changeInfo, tab) => {
+  if (changeInfo.status === "complete" && (tab.url?.includes("twitter.com") || tab.url?.includes("x.com") || tab.url?.includes("linkedin.com"))) {
     await trackSession();
     trackEvent("tab_updated", { url: tab.url });
   }

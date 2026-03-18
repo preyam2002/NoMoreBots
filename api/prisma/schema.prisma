@@ -3,8 +3,21 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum SubscriptionPlan {
+  FREE
+  PRO
+}
+
+enum UserRuleType {
+  WHITELIST
+  BLACKLIST
+  KEYWORD
+  GEO_BLOCK
 }
 
 model Tweet {
@@ -14,14 +27,19 @@ model Tweet {
   aiProbability Float
   isHidden      Boolean
   createdAt     DateTime @default(now())
-  
+
   author        Author   @relation(fields: [authorHandle], references: [handle])
+
+  @@index([authorHandle])
+  @@index([createdAt])
+  @@index([isHidden, createdAt])
 }
 
 model Author {
   handle        String   @id
   tweets        Tweet[]
   isFlagged     Boolean  @default(false)
+  location      String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }
@@ -29,42 +47,58 @@ model Author {
 model ClassificationLog {
   id        String   @id @default(uuid())
   tweetId   String
-  result    String // Was Json, now String for SQLite
+  result    Json
   timestamp DateTime @default(now())
+
+  @@index([tweetId, timestamp])
 }
 
 model ExtensionUser {
-  id            String   @id @default(uuid())
-  createdAt     DateTime @default(now())
-  isPremium     Boolean  @default(false)
-  requestCount  Int      @default(0)
-  lastRequest   DateTime @default(now())
-  
+  id            String           @id @default(uuid())
+  clientTokenHash String?        @unique
+  createdAt     DateTime         @default(now())
+  isPremium     Boolean          @default(false)
+  plan          SubscriptionPlan @default(FREE)
+  planUpdatedAt DateTime         @default(now())
+  requestCount  Int              @default(0)
+  lastRequest   DateTime         @default(now())
+
   // Stats
-  tweetsScanned Int      @default(0)
-  botsBlocked   Int      @default(0) // Tweets classified as AI
+  tweetsScanned Int              @default(0)
+  botsBlocked   Int              @default(0) // Tweets classified as AI
 
   // Content Filters
-  filterEngagement Boolean @default(false)
-  filterRagebait   Boolean @default(false)
-  filterHateSpeech Boolean @default(false)
+  filterEngagement Boolean       @default(false)
+  filterRagebait   Boolean       @default(false)
+  filterHateSpeech Boolean       @default(false)
+  filterRacism     Boolean       @default(false)
+  filterVaguePosting Boolean     @default(false)
+  filterFearmongering Boolean    @default(false)
 
   rules         UserRule[]
+
+  @@index([plan])
 }
 
-// enum RuleType {
-//   WHITELIST
-//   BLACKLIST
-//   KEYWORD
-// }
+model RateLimitBucket {
+  key         String
+  windowStart DateTime
+  count       Int      @default(0)
+  updatedAt   DateTime @updatedAt
+
+  @@id([key, windowStart])
+  @@index([updatedAt])
+}
 
 model UserRule {
-  id        String      @id @default(uuid())
+  id        String       @id @default(uuid())
   userId    String
-  user      ExtensionUser @relation(fields: [userId], references: [id])
-  type      String // Was RuleType enum, now String for SQLite
-  value     String      // handle (without @) or keyword
-  createdAt DateTime    @default(now())
+  user      ExtensionUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      UserRuleType
+  value     String       // handle (without @), keyword, or region name
+  createdAt DateTime     @default(now())
 
   @@index([userId])
+  @@index([userId, type])
+  @@unique([userId, type, value])
 }

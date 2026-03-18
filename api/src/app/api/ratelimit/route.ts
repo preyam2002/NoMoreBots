@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getRateLimitStats, getRateLimitStatus } from "@/lib/ratelimit";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const ip = request.headers.get("x-forwarded-for") || "unknown";
@@ -8,14 +10,14 @@ export async function GET(request: Request) {
 
   try {
     if (detailed) {
-      const status = getRateLimitStatus(ip);
+      const status = await getRateLimitStatus(ip);
       return NextResponse.json({
         ip,
         ...status,
       });
     }
 
-    const stats = getRateLimitStats();
+    const stats = await getRateLimitStats();
     return NextResponse.json({
       timestamp: new Date().toISOString(),
       ...stats,

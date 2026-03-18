@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
+import { authenticateExtensionUser, isAuthErrorResponse } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { buildPlanSnapshot } from "@/lib/plans";
 import { z } from "zod";
+
+export const dynamic = "force-dynamic";
 
 const ruleSchema = z.object({
   userId: z.string(),
-  type: z.enum(["WHITELIST", "BLACKLIST", "KEYWORD"]),
+  type: z.enum(["WHITELIST", "BLACKLIST", "KEYWORD", "GEO_BLOCK"]),
   value: z.string().min(1),
 });
 
@@ -17,12 +21,23 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Missing userId" }, { status: 400 });
   }
 
+  const user = await authenticateExtensionUser(request, userId);
+  if (isAuthErrorResponse(user)) {
+    return user;
+  }
+
+  const planSnapshot = buildPlanSnapshot(user);
   const rules = await prisma.userRule.findMany({
     where: { userId },
     orderBy: { createdAt: "desc" },
   });
 
-  return NextResponse.json({ rules });
+  return NextResponse.json({
+    rules,
+    plan: planSnapshot.plan,
+    featureAccess: planSnapshot.featureAccess,
+    maxRules: planSnapshot.featureAccess.maxRules,
+  });
 }
 
 // POST: Add a rule
@@ -31,9 +46,63 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { userId, type, value } = ruleSchema.parse(body);
 
-    // Clean value (remove @ from handles)
+    // Clean value (remove @ from handles, lowercase keywords and regions)
     const cleanValue =
-      type === "KEYWORD" ? value.toLowerCase() : value.replace("@", "");
+      type === "KEYWORD" || type === "GEO_BLOCK"
+        ? value.trim().toLowerCase()
+        : value.trim().replace(/^@/, "").toLowerCase();
+
+    if (!cleanValue) {
+      return NextResponse.json({ error: "Rule value is required" }, { status: 400 });
+    }
+
+    const user = await authenticateExtensionUser(request, userId);
+    if (isAuthErrorResponse(user)) {
+      return user;
+    }
+
+    const planSnapshot = buildPlanSnapshot(user);
+
+    if (type === "GEO_BLOCK" && !planSnapshot.featureAccess.geoRules) {
+      return NextResponse.json(
+        {
+          error: "Geo-blocking is available on Pro.",
+          upgradeRequired: true,
+          plan: planSnapshot.plan,
+          featureAccess: planSnapshot.featureAccess,
+        },
+        { status: 403 }
+      );
+    }
+
+    const [existingRule, ruleCount] = await Promise.all([
+      prisma.userRule.findFirst({
+        where: {
+          userId,
+          type,
+          value: cleanValue,
+        },
+      }),
+      prisma.userRule.count({
+        where: { userId },
+      }),
+    ]);
+
+    if (existingRule) {
+      return NextResponse.json({ rule: existingRule, duplicate: true });
+    }
+
+    if (ruleCount >= planSnapshot.featureAccess.maxRules) {
+      return NextResponse.json(
+        {
+          error: `Your ${planSnapshot.plan === "FREE" ? "Free" : "Pro"} plan supports up to ${planSnapshot.featureAccess.maxRules} rules.`,
+          upgradeRequired: planSnapshot.plan === "FREE",
+          plan: planSnapshot.plan,
+          featureAccess: planSnapshot.featureAccess,
+        },
+        { status: 403 }
+      );
+    }
 
     const rule = await prisma.userRule.create({
       data: {
@@ -42,8 +111,7 @@ export async function POST(request: Request) {
         value: cleanValue,
       },
     });
-
-    return NextResponse.json({ rule });
+    return NextResponse.json({ rule, plan: planSnapshot.plan });
   } catch (error) {
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });
   }
@@ -61,6 +129,11 @@ export async function DELETE(request: Request) {
         { error: "Missing id or userId" },
         { status: 400 }
       );
+    }
+
+    const user = await authenticateExtensionUser(request, userId);
+    if (isAuthErrorResponse(user)) {
+      return user;
     }
 
     // Ensure rule belongs to user

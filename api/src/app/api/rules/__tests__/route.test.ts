@@ -2,6 +2,8 @@
 const mockPrisma = {
   userRule: {
     findMany: jest.fn(),
+    findFirst: jest.fn(),
+    count: jest.fn(),
     create: jest.fn(),
     findUnique: jest.fn(),
     delete: jest.fn(),
@@ -12,11 +14,25 @@ jest.mock("@/lib/prisma", () => ({
   prisma: mockPrisma,
 }));
 
+const mockAuthenticateExtensionUser = jest.fn();
+
+jest.mock("@/lib/auth", () => ({
+  authenticateExtensionUser: (...args: unknown[]) =>
+    mockAuthenticateExtensionUser(...args),
+  isAuthErrorResponse: (value: unknown) => value instanceof Response,
+}));
+
 import { GET, POST, DELETE } from "../route";
 
 describe("Rules API", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockAuthenticateExtensionUser.mockResolvedValue({
+      plan: "FREE",
+      isPremium: false,
+    });
+    mockPrisma.userRule.findFirst.mockResolvedValue(null);
+    mockPrisma.userRule.count.mockResolvedValue(0);
   });
 
   describe("GET /api/rules", () => {
@@ -33,7 +49,8 @@ describe("Rules API", () => {
       mockPrisma.userRule.findMany.mockResolvedValue(mockRules);
 
       const request = new Request(
-        "http://localhost:3000/api/rules?userId=user-1"
+        "http://localhost:3000/api/rules?userId=user-1",
+        { headers: { "x-client-token": "token" } }
       );
       const response = await GET(request);
       const data = await response.json();
@@ -54,7 +71,8 @@ describe("Rules API", () => {
       mockPrisma.userRule.findMany.mockResolvedValue([]);
 
       const request = new Request(
-        "http://localhost:3000/api/rules?userId=new-user"
+        "http://localhost:3000/api/rules?userId=new-user",
+        { headers: { "x-client-token": "token" } }
       );
       const response = await GET(request);
       const data = await response.json();
@@ -76,7 +94,7 @@ describe("Rules API", () => {
 
       const request = new Request("http://localhost:3000/api/rules", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-client-token": "token" },
         body: JSON.stringify({
           userId: "user-1",
           type: "WHITELIST",
@@ -101,7 +119,7 @@ describe("Rules API", () => {
 
       const request = new Request("http://localhost:3000/api/rules", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-client-token": "token" },
         body: JSON.stringify({
           userId: "user-1",
           type: "BLACKLIST",
@@ -128,7 +146,7 @@ describe("Rules API", () => {
 
       const request = new Request("http://localhost:3000/api/rules", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-client-token": "token" },
         body: JSON.stringify({
           userId: "user-1",
           type: "KEYWORD",
@@ -148,7 +166,7 @@ describe("Rules API", () => {
     it("should reject invalid rule type", async () => {
       const request = new Request("http://localhost:3000/api/rules", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-client-token": "token" },
         body: JSON.stringify({
           userId: "user-1",
           type: "INVALID_TYPE",
@@ -163,7 +181,7 @@ describe("Rules API", () => {
     it("should reject empty value", async () => {
       const request = new Request("http://localhost:3000/api/rules", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-client-token": "token" },
         body: JSON.stringify({
           userId: "user-1",
           type: "WHITELIST",
@@ -173,6 +191,96 @@ describe("Rules API", () => {
 
       const response = await POST(request);
       expect(response.status).toBe(400);
+    });
+
+    it("should reject geo-block rules on the free plan", async () => {
+      const request = new Request("http://localhost:3000/api/rules", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-client-token": "token" },
+        body: JSON.stringify({
+          userId: "user-1",
+          type: "GEO_BLOCK",
+          value: "india",
+        }),
+      });
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(403);
+      expect(data.upgradeRequired).toBe(true);
+    });
+
+    it("should allow geo-block rules on pro", async () => {
+      mockAuthenticateExtensionUser.mockResolvedValue({
+        plan: "PRO",
+        isPremium: true,
+      });
+      mockPrisma.userRule.create.mockResolvedValue({
+        id: "geo-1",
+        userId: "user-1",
+        type: "GEO_BLOCK",
+        value: "india",
+      });
+
+      const request = new Request("http://localhost:3000/api/rules", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-client-token": "token" },
+        body: JSON.stringify({
+          userId: "user-1",
+          type: "GEO_BLOCK",
+          value: "India",
+        }),
+      });
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.rule.type).toBe("GEO_BLOCK");
+    });
+
+    it("should reject new rules when the plan limit is reached", async () => {
+      mockPrisma.userRule.count.mockResolvedValue(20);
+
+      const request = new Request("http://localhost:3000/api/rules", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-client-token": "token" },
+        body: JSON.stringify({
+          userId: "user-1",
+          type: "KEYWORD",
+          value: "test",
+        }),
+      });
+
+      const response = await POST(request);
+      expect(response.status).toBe(403);
+    });
+
+    it("should return an existing duplicate rule instead of creating a new one", async () => {
+      mockPrisma.userRule.findFirst.mockResolvedValue({
+        id: "existing-rule",
+        userId: "user-1",
+        type: "KEYWORD",
+        value: "crypto",
+      });
+
+      const request = new Request("http://localhost:3000/api/rules", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-client-token": "token" },
+        body: JSON.stringify({
+          userId: "user-1",
+          type: "KEYWORD",
+          value: "crypto",
+        }),
+      });
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.duplicate).toBe(true);
+      expect(mockPrisma.userRule.create).not.toHaveBeenCalled();
     });
   });
 
@@ -188,7 +296,7 @@ describe("Rules API", () => {
 
       const request = new Request(
         "http://localhost:3000/api/rules?id=rule-1&userId=user-1",
-        { method: "DELETE" }
+        { method: "DELETE", headers: { "x-client-token": "token" } }
       );
 
       const response = await DELETE(request);
@@ -208,7 +316,7 @@ describe("Rules API", () => {
 
       const request = new Request(
         "http://localhost:3000/api/rules?id=rule-1&userId=user-1",
-        { method: "DELETE" }
+        { method: "DELETE", headers: { "x-client-token": "token" } }
       );
 
       const response = await DELETE(request);

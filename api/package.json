@@ -10,6 +10,12 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
+    "db:generate": "prisma generate",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:push": "prisma db push",
+    "db:studio": "prisma studio",
+    "db:validate": "prisma validate",
     "postinstall": "prisma generate"
   },
   "dependencies": {
@@ -28,10 +34,13 @@
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
+    "autoprefixer": "^10.4.27",
     "graceful-fs": "^4.2.11",
     "jest": "^29.7.0",
     "jest-mock-extended": "^3.0.5",
+    "postcss": "^8.5.8",
     "prisma": "^5.10.0",
+    "tailwindcss": "^3.4.19",
     "ts-jest": "^29.1.2",
     "typescript": "^5"
   }

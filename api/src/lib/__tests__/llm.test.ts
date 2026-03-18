@@ -1,4 +1,4 @@
-import { classifyTweet, LLMProvider } from "../llm";
+import { buildClassificationPrompt, classifyTweet, LLMProvider } from "../llm";
 
 // Mock the LLM providers
 jest.mock("openai", () => {
@@ -143,6 +143,25 @@ describe("classifyTweet", () => {
       );
 
       expect(result).toBeDefined();
+    });
+  });
+
+  describe("prompt construction", () => {
+    it("should include reply, quote, and media metadata in the prompt", () => {
+      const prompt = buildClassificationPrompt("look at this", {
+        context: "parent post text",
+        quotedText: "quoted post text",
+        mediaSummary: "1 image. image alt text: chart showing losses",
+        isReply: true,
+        platform: "twitter",
+      });
+
+      expect(prompt).toContain('Post text: "look at this"');
+      expect(prompt).toContain('Parent conversation context: "parent post text"');
+      expect(prompt).toContain('Quoted post text: "quoted post text"');
+      expect(prompt).toContain('Attached media summary: "1 image. image alt text: chart showing losses"');
+      expect(prompt).toContain("Reply signal");
+      expect(prompt).toContain("Platform: twitter");
     });
   });
 });

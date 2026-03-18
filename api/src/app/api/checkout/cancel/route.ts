@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { authenticateExtensionUser, isAuthErrorResponse } from "@/lib/auth";
 import { z } from "zod";
 
 const cancelSchema = z.object({
@@ -10,15 +10,11 @@ const cancelSchema = z.object({
 export async function POST(request: Request) {
   try {
     const { userId, sessionId } = cancelSchema.parse(await request.json());
+    void sessionId;
 
-    // Verify user exists
-    const user = await prisma.extensionUser.findUnique({
-      where: { id: userId },
-      select: { id: true, isPremium: true },
-    });
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    const user = await authenticateExtensionUser(request, userId);
+    if (isAuthErrorResponse(user)) {
+      return user;
     }
 
     return NextResponse.json({ 

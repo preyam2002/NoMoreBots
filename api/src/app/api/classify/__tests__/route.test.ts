@@ -1,8 +1,6 @@
-import { NextRequest } from "next/server";
-
-const mockPrisma = {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const mockPrisma: any = {
   extensionUser: {
-    upsert: jest.fn(),
     update: jest.fn(),
     findUnique: jest.fn(),
   },
@@ -16,19 +14,35 @@ const mockPrisma = {
   },
   author: {
     upsert: jest.fn(),
+    findMany: jest.fn().mockResolvedValue([]),
   },
   classificationLog: {
     create: jest.fn(),
   },
-  $transaction: jest.fn((callback) => callback(mockPrisma)),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  $transaction: jest.fn((callback: (prisma: any) => any) => callback(mockPrisma)),
 };
 
 jest.mock("@/lib/prisma", () => ({
   prisma: mockPrisma,
 }));
 
+const mockAuthenticateExtensionUser = jest.fn();
+
+jest.mock("@/lib/auth", () => ({
+  authenticateExtensionUser: (...args: unknown[]) =>
+    mockAuthenticateExtensionUser(...args),
+  isAuthErrorResponse: (value: unknown) => value instanceof Response,
+}));
+
 jest.mock("@/lib/ratelimit", () => ({
   rateLimit: jest.fn(() => ({ success: true })),
+  getRateLimitStatus: jest.fn(() => ({
+    remaining: 59,
+    limit: 60,
+    resetTime: Date.now() + 60000,
+  })),
+  addRateLimitHeaders: jest.fn((response) => response),
 }));
 
 jest.mock("@/lib/llm", () => ({
@@ -40,6 +54,7 @@ jest.mock("@/lib/llm", () => ({
 }));
 
 // Import after mocks are set up
+import { classifyTweet } from "@/lib/llm";
 import { POST } from "../route";
 
 describe("POST /api/classify", () => {
@@ -47,13 +62,18 @@ describe("POST /api/classify", () => {
     jest.clearAllMocks();
 
     // Default mock implementations
-    mockPrisma.extensionUser.upsert.mockResolvedValue({
+    mockAuthenticateExtensionUser.mockResolvedValue({
       id: "test-user-id",
       isPremium: false,
+      plan: "FREE",
       requestCount: 0,
+      lastRequest: new Date(),
       filterEngagement: false,
       filterRagebait: false,
       filterHateSpeech: false,
+      filterRacism: false,
+      filterVaguePosting: false,
+      filterFearmongering: false,
     });
     mockPrisma.userRule.findMany.mockResolvedValue([]);
     mockPrisma.tweet.findUnique.mockResolvedValue(null);
@@ -113,6 +133,35 @@ describe("POST /api/classify", () => {
       expect(data.results[0].cached).toBe(true);
       expect(data.results[0].aiProbability).toBe(0.9);
     });
+
+    it("should classify media-only tweets when media metadata is present", async () => {
+      const request = createMockRequest({
+        tweets: [
+          {
+            id: "tweet-media-only",
+            text: "",
+            mediaSummary: "1 image. image alt text: screenshot of an argument thread",
+            authorHandle: "user",
+            isReply: true,
+          },
+        ],
+      });
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.results).toHaveLength(1);
+      expect(classifyTweet).toHaveBeenCalledWith(
+        "",
+        undefined,
+        "gemini",
+        expect.objectContaining({
+          mediaSummary: "1 image. image alt text: screenshot of an argument thread",
+          isReply: true,
+        })
+      );
+    });
   });
 
   describe("validation", () => {
@@ -131,6 +180,15 @@ describe("POST /api/classify", () => {
 
     it("should reject empty tweets array", async () => {
       const request = createMockRequest({ tweets: [] });
+      const response = await POST(request);
+      expect(response.status).toBe(400);
+    });
+
+    it("should reject tweets without any text or media context", async () => {
+      const request = createMockRequest({
+        tweets: [{ id: "1", text: "", authorHandle: "user" }],
+      });
+
       const response = await POST(request);
       expect(response.status).toBe(400);
     });
@@ -208,13 +266,18 @@ describe("POST /api/classify", () => {
 
   describe("request processing", () => {
     it("should allow premium users past the limit", async () => {
-      mockPrisma.extensionUser.upsert.mockResolvedValue({
+      mockAuthenticateExtensionUser.mockResolvedValue({
         id: "test-user-id",
         isPremium: true,
+        plan: "PRO",
         requestCount: 500,
+        lastRequest: new Date(),
         filterEngagement: false,
         filterRagebait: false,
         filterHateSpeech: false,
+        filterRacism: false,
+        filterVaguePosting: false,
+        filterFearmongering: false,
       });
 
       const request = createMockRequest({
@@ -223,6 +286,140 @@ describe("POST /api/classify", () => {
 
       const response = await POST(request);
       expect(response.status).toBe(200);
+    });
+
+    it("should block LinkedIn scanning on the free plan", async () => {
+      const request = createMockRequest({
+        tweets: [{ id: "li-1", text: "LinkedIn content", authorHandle: "user", platform: "linkedin" }],
+      });
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(403);
+      expect(data.upgradeRequired).toBe(true);
+    });
+
+    it("should block paid provider selection on the free plan", async () => {
+      const request = createMockRequest(
+        {
+          tweets: [{ id: "tweet-1", text: "Content", authorHandle: "user" }],
+        },
+        {
+          "x-provider": "openai",
+        }
+      );
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(403);
+      expect(data.error).toContain("Provider");
+    });
+
+    it("should not count geo-block matches as billable AI usage", async () => {
+      mockPrisma.userRule.findMany.mockResolvedValue([
+        { type: "GEO_BLOCK", value: "india" },
+      ]);
+      mockAuthenticateExtensionUser.mockResolvedValue({
+        id: "test-user-id",
+        isPremium: true,
+        plan: "PRO",
+        requestCount: 7,
+        lastRequest: new Date(),
+        filterEngagement: false,
+        filterRagebait: false,
+        filterHateSpeech: false,
+        filterRacism: false,
+        filterVaguePosting: false,
+        filterFearmongering: false,
+      });
+      mockPrisma.author.findMany.mockResolvedValue([
+        { handle: "traveler", location: "Bangalore, India" },
+      ]);
+
+      const request = createMockRequest({
+        tweets: [{ id: "tweet-geo", text: "Local post", authorHandle: "traveler" }],
+      });
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.results[0].label).toBe("geo_blocked");
+      expect(data.usage.requestCount).toBe(7);
+      expect(mockPrisma.extensionUser.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            requestCount: { increment: 0 },
+          }),
+        })
+      );
+    });
+
+    it("should convert racism categories into a filtered label when enabled", async () => {
+      mockAuthenticateExtensionUser.mockResolvedValue({
+        id: "test-user-id",
+        isPremium: true,
+        plan: "PRO",
+        requestCount: 0,
+        lastRequest: new Date(),
+        filterEngagement: false,
+        filterRagebait: false,
+        filterHateSpeech: false,
+        filterRacism: true,
+        filterVaguePosting: false,
+        filterFearmongering: false,
+      });
+      (classifyTweet as jest.Mock).mockResolvedValueOnce({
+        aiProbability: 0.22,
+        category: "racism",
+        reason: "Uses race-based slurs and exclusionary framing",
+      });
+
+      const request = createMockRequest({
+        tweets: [{ id: "tweet-racism", text: "example", authorHandle: "user" }],
+      });
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.results[0].label).toBe("racism");
+      expect(data.results[0].aiProbability).toBe(1);
+      expect(data.results[0].reason).toContain("Filtered: Racism.");
+    });
+
+    it("should convert vague-posting categories into a filtered label when enabled", async () => {
+      mockAuthenticateExtensionUser.mockResolvedValue({
+        id: "test-user-id",
+        isPremium: true,
+        plan: "PRO",
+        requestCount: 0,
+        lastRequest: new Date(),
+        filterEngagement: false,
+        filterRagebait: false,
+        filterHateSpeech: false,
+        filterRacism: false,
+        filterVaguePosting: true,
+        filterFearmongering: false,
+      });
+      (classifyTweet as jest.Mock).mockResolvedValueOnce({
+        aiProbability: 0.33,
+        category: "vague_posting",
+        reason: "Cryptic grievance without details",
+      });
+
+      const request = createMockRequest({
+        tweets: [{ id: "tweet-vague", text: "example", authorHandle: "user" }],
+      });
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.results[0].label).toBe("vague_posting");
+      expect(data.results[0].reason).toContain("Filtered: Vague Posting.");
     });
   });
 });

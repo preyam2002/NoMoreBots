@@ -3,10 +3,11 @@ import { headers } from "next/headers";
 import Stripe from "stripe";
 import { prisma } from "@/lib/prisma";
 import { env } from "@/lib/env";
+import { normalizePlanId } from "@shared/plans";
 
 const stripe = env.STRIPE_SECRET_KEY
   ? new Stripe(env.STRIPE_SECRET_KEY, {
-      apiVersion: "2023-10-16",
+      apiVersion: "2025-11-17.clover" as any,
     })
   : null;
 
@@ -38,22 +39,24 @@ export async function POST(request: Request) {
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
     const userId = session.metadata?.userId;
+    const selectedPlan = normalizePlanId(session.metadata?.plan, true);
 
     if (userId) {
       try {
-        const user = await prisma.extensionUser.findUnique({
+        await prisma.extensionUser.upsert({
           where: { id: userId },
+          update: {
+            isPremium: selectedPlan === "PRO",
+            plan: selectedPlan,
+            planUpdatedAt: new Date(),
+          },
+          create: {
+            id: userId,
+            isPremium: selectedPlan === "PRO",
+            plan: selectedPlan,
+          },
         });
-
-        if (user) {
-          await prisma.extensionUser.update({
-            where: { id: userId },
-            data: { isPremium: true },
-          });
-          console.log(`User ${userId} upgraded to premium`);
-        } else {
-          console.warn(`User ${userId} not found for premium upgrade`);
-        }
+        console.log(`User ${userId} upgraded to ${selectedPlan}`);
       } catch (error) {
         console.error(`Error upgrading user ${userId}:`, error);
         return NextResponse.json(

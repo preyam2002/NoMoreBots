@@ -1,8 +1,8 @@
 # NoMoreBots
 
-A Chrome extension that filters AI-generated and low-quality content from your Twitter/X feed using AI-powered content analysis.
+A Chrome extension that filters AI-generated and low-quality content from your Twitter/X and LinkedIn feeds using AI-powered content analysis.
 
-![Version](https://img.shields.io/badge/version-1.1.0-blue)
+![Version](https://img.shields.io/badge/version-1.3.1-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## Features
@@ -17,6 +17,9 @@ A Chrome extension that filters AI-generated and low-quality content from your T
 - **Engagement Farming**: Filter tweets asking for likes, retweets, or followers
 - **Ragebait**: Block intentionally provocative content
 - **Hate Speech**: Automatically hide harmful content
+- **Racism**: Catch race- or ethnicity-targeted hostility separately
+- **Vague Posting**: Filter cryptic grievance and drama-bait posts
+- **Fearmongering**: Reduce panic-driven, alarmist posting
 
 ### Rules System
 - **Whitelist**: Always show tweets from trusted accounts
@@ -30,10 +33,9 @@ A Chrome extension that filters AI-generated and low-quality content from your T
 - **Usage Tracking**: Monitor API requests and limits
 - **Tabbed Interface**: Overview, Filters, Rules, Analytics
 
-### Premium Features
-- Unlimited API requests
-- Advanced analytics
-- Priority processing
+### Plans
+- **Free**: Twitter/X scanning, Gemini detection, blur mode, 100 daily requests
+- **Pro**: LinkedIn scanning, provider selection, advanced filters, geo rules, richer analytics
 
 ## Tech Stack
 
@@ -46,7 +48,7 @@ A Chrome extension that filters AI-generated and low-quality content from your T
 
 ### Backend (API)
 - **Framework**: Next.js 14 (App Router)
-- **Database**: SQLite with Prisma ORM
+- **Database**: PostgreSQL with Prisma ORM (Supabase-friendly)
 - **AI Providers**: OpenAI, Anthropic, Google Gemini
 - **Validation**: Zod
 - **Testing**: Jest
@@ -57,6 +59,7 @@ A Chrome extension that filters AI-generated and low-quality content from your T
 - Node.js 18+
 - npm or pnpm
 - Chrome browser
+- PostgreSQL database (Supabase or local Docker)
 - API key from at least one AI provider (OpenAI, Anthropic, or Google)
 
 ### Installation
@@ -68,11 +71,12 @@ cd NoMoreBots
 
 2. **Setup the API**
 ```bash
+docker compose up -d db
 cd api
 npm install
 cp .env.example .env.local
-# Edit .env.local with your API keys
-npm run postinstall
+# Edit .env.local with your Postgres/Supabase connection strings and API keys
+npm run db:migrate:deploy
 npm run dev
 ```
 
@@ -80,6 +84,7 @@ npm run dev
 ```bash
 cd extension
 npm install
+cp .env.example .env
 npm run build
 ```
 
@@ -91,9 +96,13 @@ npm run build
 
 ### Environment Variables
 
-#### API (.env.local)
+#### API (`api/.env.local`)
 ```env
-DATABASE_URL="file:./dev.db"
+# Supabase or Postgres runtime connection
+DATABASE_URL="postgresql://USER:PASSWORD@HOST:5432/postgres?sslmode=require"
+
+# Direct connection for Prisma migrations
+DIRECT_URL="postgresql://USER:PASSWORD@HOST:5432/postgres?sslmode=require"
 
 # At least one required
 OPENAI_API_KEY=sk-...
@@ -104,10 +113,23 @@ GEMINI_API_KEY=...
 STRIPE_SECRET_KEY=sk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 STRIPE_PRICE_ID=price_...
+STRIPE_PRO_PRICE_ID=price_...
 
 # App URL
-NEXT_PUBLIC_APP_URL=http://localhost:3000
+NEXT_PUBLIC_APP_URL=https://your-api-domain.com
+
+# Optional hard timeout for provider calls (milliseconds)
+AI_PROVIDER_TIMEOUT_MS=12000
 ```
+
+For Supabase, use the exact pooled/runtime and direct strings from the project's Connect panel. `DATABASE_URL` is used by the running app, and `DIRECT_URL` is used by Prisma migrations.
+
+#### Extension (`extension/.env`)
+```env
+VITE_API_BASE_URL=https://your-api-domain.com
+```
+
+Production builds enforce HTTPS, non-localhost values for both `NEXT_PUBLIC_APP_URL` and `VITE_API_BASE_URL`.
 
 ## Usage
 
@@ -116,7 +138,7 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 1. **Enable/Disable**: Toggle the filter from the extension popup
 2. **Adjust Sensitivity**: Use the slider to set how strict detection should be
 3. **Add Rules**: Go to the Rules tab to whitelist/blacklist accounts
-4. **Configure Filters**: Enable engagement farming, ragebait, or hate speech filters
+4. **Configure Filters**: Enable engagement farming, ragebait, hate speech, racism, vague-posting, or fearmongering filters
 5. **View Analytics**: Check the dashboard for usage statistics
 
 ### Keyboard Shortcuts
@@ -128,6 +150,7 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/classify` | POST | Classify tweets for AI content |
+| `/api/register` | POST | Mint a client token for the extension |
 | `/api/stats` | GET | Get user statistics |
 | `/api/settings` | POST | Update filter preferences |
 | `/api/rules` | GET/POST/DELETE | Manage whitelist/blacklist rules |
@@ -139,6 +162,7 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 POST /api/classify
 Headers:
   x-user-id: string (required)
+  x-client-token: string (required)
   x-api-key: string (optional)
   x-provider: "openai" | "gemini" | "anthropic" (optional)
 
@@ -148,7 +172,11 @@ Body:
     id: string,
     text: string,
     authorHandle: string (optional),
-    context: string (optional)
+    context: string (optional),
+    quotedText: string (optional),
+    mediaSummary: string (optional),
+    isReply: boolean (optional),
+    platform: "twitter" | "linkedin" (optional)
   }]
 }
 
@@ -157,10 +185,16 @@ Response:
   results: [{
     tweetId: string,
     aiProbability: number (0-1),
-    label: "ai" | "human" | "engagement" | "ragebait" | "hate_speech",
+    label: "ai" | "human" | "engagement" | "ragebait" | "hate_speech" | "racism" | "vague_posting" | "fearmongering",
     reason: string,
     cached: boolean
-  }]
+  }],
+  usage: {
+    requestCount: number,
+    dailyLimit: number,
+    remaining: number
+  },
+  plan: "FREE" | "PRO"
 }
 ```
 
@@ -173,6 +207,7 @@ NoMoreBots/
 │   │   ├── app/
 │   │   │   ├── api/
 │   │   │   │   ├── classify/     # Classification endpoint
+│   │   │   │   ├── register/     # Client registration/token minting
 │   │   │   │   ├── rules/       # Rules CRUD
 │   │   │   │   ├── settings/    # Filter settings
 │   │   │   │   ├── stats/       # User statistics
@@ -180,8 +215,9 @@ NoMoreBots/
 │   │   │   └── dashboard/       # Dashboard page
 │   │   └── lib/
 │   │       ├── llm.ts          # AI provider integration
+│   │       ├── auth.ts         # Client token validation
 │   │       ├── prisma.ts       # Database client
-│   │       ├── ratelimit.ts    # Rate limiting
+│   │       ├── ratelimit.ts    # Postgres-backed rate limiting
 │   │       └── env.ts          # Environment validation
 │   └── prisma/
 │       └── schema.prisma       # Database schema
@@ -195,7 +231,7 @@ NoMoreBots/
 │   │   └── popup/             # Extension popup UI
 │   │       ├── App.tsx        # Main popup component
 │   │       └── ...
-│   ├── manifest.json           # Manifest V3
+│   ├── manifest.config.ts      # Manifest V3 (env-aware)
 │   └── icons/                  # Extension icons (SVG)
 │
 └── shared/                      # Shared TypeScript types
@@ -227,6 +263,34 @@ npm run build
 cd api
 npm run build
 ```
+
+### Production Checklist
+
+```bash
+# 1. Point the extension at your deployed API
+cd extension
+cp .env.example .env
+# Set VITE_API_BASE_URL=https://your-api.example.com
+
+# 2. Configure the API
+cd ../api
+cp .env.example .env.local
+# Set DATABASE_URL, DIRECT_URL, NEXT_PUBLIC_APP_URL, AI keys, Stripe keys, and price IDs
+
+# 3. Run migrations
+npm run db:migrate:deploy
+
+# 4. Verify before deploy
+npm test -- --runInBand
+npm run build
+cd ../extension && npm run build
+```
+
+### Production Notes
+
+- The extension now registers itself with a server-minted client token. API routes used by the extension require both `x-user-id` and `x-client-token`.
+- Minute-based rate limiting is stored in Postgres, so the limit is shared across instances instead of resetting per process.
+- Supabase works as the production database without code changes; update only `DATABASE_URL` and `DIRECT_URL`.
 
 ### Testing
 

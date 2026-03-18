@@ -1,8 +1,7 @@
 // Mock Prisma client
-const mockPrisma = {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const mockPrisma: any = {
   extensionUser: {
-    upsert: jest.fn(),
-    update: jest.fn(),
     findUnique: jest.fn(),
   },
   userRule: {
@@ -21,11 +20,20 @@ const mockPrisma = {
   classificationLog: {
     create: jest.fn(),
   },
-  $transaction: jest.fn((callback) => callback(mockPrisma)),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  $transaction: jest.fn((callback: (prisma: any) => any) => callback(mockPrisma)),
 };
 
 jest.mock("@/lib/prisma", () => ({
   prisma: mockPrisma,
+}));
+
+const mockAuthenticateExtensionUser = jest.fn();
+
+jest.mock("@/lib/auth", () => ({
+  authenticateExtensionUser: (...args: unknown[]) =>
+    mockAuthenticateExtensionUser(...args),
+  isAuthErrorResponse: (value: unknown) => value instanceof Response,
 }));
 
 import { GET } from "../route";
@@ -33,6 +41,7 @@ import { GET } from "../route";
 describe("Stats API", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockAuthenticateExtensionUser.mockResolvedValue({ id: "user-1" });
   });
 
   describe("GET /api/stats", () => {
@@ -43,13 +52,17 @@ describe("Stats API", () => {
         botsBlocked: 42,
         requestCount: 100,
         isPremium: false,
+        plan: "FREE",
         filterEngagement: true,
         filterRagebait: false,
         filterHateSpeech: true,
+        filterRacism: false,
+        filterVaguePosting: true,
+        filterFearmongering: false,
       });
-
       const request = new Request(
-        "http://localhost:3000/api/stats?userId=user-1"
+        "http://localhost:3000/api/stats?userId=user-1",
+        { headers: { "x-client-token": "token" } }
       );
       const response = await GET(request);
       const data = await response.json();
@@ -60,22 +73,27 @@ describe("Stats API", () => {
       expect(data.requestCount).toBe(100);
       expect(data.dailyLimit).toBe(100);
       expect(data.isPremium).toBe(false);
+      expect(data.plan).toBe("FREE");
     });
 
     it("should return premium limit for premium users", async () => {
       mockPrisma.extensionUser.findUnique.mockResolvedValue({
-        id: "user-1",
         tweetsScanned: 500,
         botsBlocked: 100,
         requestCount: 450,
         isPremium: true,
+        plan: "PRO",
         filterEngagement: false,
         filterRagebait: true,
         filterHateSpeech: false,
+        filterRacism: true,
+        filterVaguePosting: false,
+        filterFearmongering: true,
       });
 
       const request = new Request(
-        "http://localhost:3000/api/stats?userId=user-1"
+        "http://localhost:3000/api/stats?userId=user-1",
+        { headers: { "x-client-token": "token" } }
       );
       const response = await GET(request);
       const data = await response.json();
@@ -83,6 +101,7 @@ describe("Stats API", () => {
       expect(response.status).toBe(200);
       expect(data.isPremium).toBe(true);
       expect(data.dailyLimit).toBe(10000);
+      expect(data.plan).toBe("PRO");
     });
 
     it("should return error when userId is missing", async () => {
@@ -92,11 +111,12 @@ describe("Stats API", () => {
       expect(response.status).toBe(400);
     });
 
-    it("should return 404 for non-existent user", async () => {
+    it("should return not found when the user does not exist", async () => {
       mockPrisma.extensionUser.findUnique.mockResolvedValue(null);
 
       const request = new Request(
-        "http://localhost:3000/api/stats?userId=non-existent"
+        "http://localhost:3000/api/stats?userId=non-existent",
+        { headers: { "x-client-token": "token" } }
       );
       const response = await GET(request);
 
@@ -105,18 +125,22 @@ describe("Stats API", () => {
 
     it("should return filter settings", async () => {
       mockPrisma.extensionUser.findUnique.mockResolvedValue({
-        id: "user-1",
         tweetsScanned: 0,
         botsBlocked: 0,
         requestCount: 0,
         isPremium: false,
+        plan: "FREE",
         filterEngagement: true,
         filterRagebait: true,
         filterHateSpeech: true,
+        filterRacism: true,
+        filterVaguePosting: true,
+        filterFearmongering: true,
       });
 
       const request = new Request(
-        "http://localhost:3000/api/stats?userId=user-1"
+        "http://localhost:3000/api/stats?userId=user-1",
+        { headers: { "x-client-token": "token" } }
       );
       const response = await GET(request);
       const data = await response.json();
@@ -125,6 +149,9 @@ describe("Stats API", () => {
       expect(data.filterEngagement).toBe(true);
       expect(data.filterRagebait).toBe(true);
       expect(data.filterHateSpeech).toBe(true);
+      expect(data.filterRacism).toBe(true);
+      expect(data.filterVaguePosting).toBe(true);
+      expect(data.filterFearmongering).toBe(true);
     });
   });
 });

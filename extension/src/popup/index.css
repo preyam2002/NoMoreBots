@@ -2,8 +2,165 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, sans-serif;
+@layer base {
+  :root {
+    --nmb-paper: #f3e8d5;
+    --nmb-paper-strong: #fffaf1;
+    --nmb-ink: #1b1713;
+    --nmb-muted: #6f665d;
+    --nmb-rust: #bf623d;
+    --nmb-rust-dark: #8f4326;
+    --nmb-moss: #74826b;
+    --nmb-gold: #cfaa63;
+    --nmb-line: rgba(27, 23, 19, 0.12);
+    --nmb-shadow: rgba(27, 23, 19, 0.12);
+  }
+
+  body {
+    margin: 0;
+    color: var(--nmb-ink);
+    font-family: "Avenir Next", "Trebuchet MS", "Gill Sans", sans-serif;
+    background:
+      radial-gradient(circle at top left, rgba(191, 98, 61, 0.18), transparent 24%),
+      radial-gradient(circle at 88% 10%, rgba(116, 130, 107, 0.16), transparent 20%),
+      linear-gradient(180deg, #f9f1e4 0%, #efe1cb 100%);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  .nmb-display {
+    font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+    letter-spacing: -0.02em;
+  }
+}
+
+@layer components {
+  .popup-shell {
+    position: relative;
+    isolation: isolate;
+    background:
+      radial-gradient(circle at 12% 14%, rgba(255, 250, 241, 0.85), transparent 16%),
+      linear-gradient(180deg, #f7eedf 0%, #efdcc2 100%);
+  }
+
+  .popup-shell::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.3;
+    background-image:
+      linear-gradient(rgba(27, 23, 19, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(27, 23, 19, 0.05) 1px, transparent 1px);
+    background-size: 24px 24px;
+    mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.68), transparent 96%);
+  }
+
+  .nmb-micro {
+    font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+  }
+
+  .nmb-card {
+    @apply rounded-[24px] border;
+    border-color: var(--nmb-line);
+    background: rgba(255, 250, 241, 0.84);
+    box-shadow: 8px 8px 0 var(--nmb-shadow);
+    backdrop-filter: blur(14px);
+  }
+
+  .nmb-card-dark {
+    @apply rounded-[24px] border text-[#fff8ef];
+    border-color: rgba(255, 250, 241, 0.16);
+    background:
+      radial-gradient(circle at top left, rgba(207, 170, 99, 0.16), transparent 30%),
+      linear-gradient(145deg, #241d18 0%, #18120f 100%);
+    box-shadow: 10px 10px 0 rgba(24, 18, 15, 0.18);
+  }
+
+  .nmb-chip {
+    @apply inline-flex items-center rounded-full px-3 py-1 text-[10px] font-semibold;
+    border: 1px solid rgba(27, 23, 19, 0.08);
+    background: rgba(255, 250, 241, 0.92);
+    color: var(--nmb-muted);
+  }
+
+  .nmb-tab {
+    @apply flex-1 rounded-full border px-3 py-2 text-[11px] font-semibold transition-all;
+    border-color: transparent;
+    color: var(--nmb-muted);
+  }
+
+  .nmb-tab:hover {
+    background: rgba(255, 250, 241, 0.62);
+    color: var(--nmb-ink);
+  }
+
+  .nmb-tab-active {
+    border-color: rgba(27, 23, 19, 0.1);
+    background: rgba(255, 250, 241, 0.88);
+    color: var(--nmb-ink);
+    box-shadow: 6px 6px 0 rgba(27, 23, 19, 0.08);
+  }
+
+  .nmb-button-primary {
+    @apply inline-flex items-center justify-center rounded-full px-4 py-2 text-xs font-semibold text-[#fff8ef] transition-transform duration-150;
+    background: linear-gradient(135deg, var(--nmb-rust) 0%, var(--nmb-rust-dark) 100%);
+    box-shadow: 0 10px 20px rgba(191, 98, 61, 0.2);
+  }
+
+  .nmb-button-primary:hover {
+    transform: translateY(-1px);
+  }
+
+  .nmb-button-secondary {
+    @apply inline-flex items-center justify-center rounded-full border px-4 py-2 text-xs font-semibold transition-colors;
+    border-color: rgba(27, 23, 19, 0.12);
+    background: rgba(255, 250, 241, 0.78);
+    color: var(--nmb-ink);
+  }
+
+  .nmb-field {
+    @apply w-full rounded-[18px] border px-4 py-3 text-sm outline-none transition-colors;
+    border-color: rgba(27, 23, 19, 0.12);
+    background: rgba(255, 250, 241, 0.88);
+    color: var(--nmb-ink);
+  }
+
+  .nmb-field::placeholder {
+    color: #938677;
+  }
+
+  .nmb-field:focus {
+    border-color: rgba(191, 98, 61, 0.45);
+    box-shadow: 0 0 0 4px rgba(191, 98, 61, 0.12);
+  }
+
+  .nmb-meter {
+    @apply h-2 overflow-hidden rounded-full;
+    background: rgba(27, 23, 19, 0.08);
+  }
+
+  .nmb-meter > span {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--nmb-gold) 0%, var(--nmb-rust) 100%);
+  }
+
+  .nmb-toast {
+    @apply fixed left-3 right-3 top-3 z-50 rounded-full px-4 py-2 text-sm font-semibold text-[#fff8ef];
+    box-shadow: 0 14px 28px rgba(27, 23, 19, 0.18);
+  }
+
+  .nmb-toast-success {
+    background: linear-gradient(135deg, #667d5e 0%, #4d5f45 100%);
+  }
+
+  .nmb-toast-error {
+    background: linear-gradient(135deg, #b65d42 0%, #8c432d 100%);
+  }
 }

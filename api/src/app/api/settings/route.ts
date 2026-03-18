@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { authenticateExtensionUser, isAuthErrorResponse } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { buildPlanSnapshot } from "@/lib/plans";
 import { z } from "zod";
 
 const updateSettingsSchema = z.object({
@@ -7,22 +9,49 @@ const updateSettingsSchema = z.object({
   filterEngagement: z.boolean().optional(),
   filterRagebait: z.boolean().optional(),
   filterHateSpeech: z.boolean().optional(),
+  filterRacism: z.boolean().optional(),
+  filterVaguePosting: z.boolean().optional(),
+  filterFearmongering: z.boolean().optional(),
 });
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { userId, filterEngagement, filterRagebait, filterHateSpeech } =
+    const {
+      userId,
+      filterEngagement,
+      filterRagebait,
+      filterHateSpeech,
+      filterRacism,
+      filterVaguePosting,
+      filterFearmongering,
+    } =
       updateSettingsSchema.parse(body);
 
-    const user = await prisma.extensionUser.findUnique({
-      where: { id: userId },
-    });
+    const user = await authenticateExtensionUser(request, userId);
+    if (isAuthErrorResponse(user)) {
+      return user;
+    }
 
-    if (!user) {
+    const planSnapshot = buildPlanSnapshot(user);
+
+    const wantsAdvancedFilter =
+      filterEngagement === true ||
+      filterRagebait === true ||
+      filterHateSpeech === true ||
+      filterRacism === true ||
+      filterVaguePosting === true ||
+      filterFearmongering === true;
+
+    if (wantsAdvancedFilter && !planSnapshot.featureAccess.advancedFilters) {
       return NextResponse.json(
-        { error: "User not found" },
-        { status: 404 }
+        {
+          error: "Advanced content filters are available on Pro.",
+          upgradeRequired: true,
+          plan: planSnapshot.plan,
+          featureAccess: planSnapshot.featureAccess,
+        },
+        { status: 403 }
       );
     }
 
@@ -32,10 +61,18 @@ export async function POST(request: Request) {
         filterEngagement,
         filterRagebait,
         filterHateSpeech,
+        filterRacism,
+        filterVaguePosting,
+        filterFearmongering,
       },
     });
 
-    return NextResponse.json({ success: true, user: updated });
+    return NextResponse.json({
+      success: true,
+      user: updated,
+      plan: planSnapshot.plan,
+      featureAccess: planSnapshot.featureAccess,
+    });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(

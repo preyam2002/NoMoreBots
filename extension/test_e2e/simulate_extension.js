@@ -1,3 +1,8 @@
+if (typeof window === "undefined") {
+  console.error("Run this harness in a browser against extension/test_e2e/index.html, not directly with Node.");
+  process.exit(1);
+}
+
 // Simulate Chrome API
 window.chrome = {
   storage: {
@@ -75,11 +80,6 @@ async function checkTweets() {
     if (data.results) {
       data.results.forEach(result => {
         if (result.aiProbability > 0.6) { // Matches mock threshold
-          const item = batch.find(b => b.text === result.tweetId || b.id === result.tweetId); 
-          // Note: createMockRequest in API test returns tweetId same as input id. 
-          // Here we match by ID.
-          
-          // Find the item in batch
           const batchItem = batch.find(b => b.id === result.tweetId);
           if (batchItem) {
              console.log(`Hiding tweet from ${batchItem.authorHandle} (Prob: ${result.aiProbability})`);
